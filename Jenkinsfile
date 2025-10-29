@@ -1,82 +1,69 @@
 pipeline {
-    agent any
-    
+    agent {
+        docker {
+            image 'python:3.10-slim'
+            args '-u root:root'   // allow installing dependencies
+        }
+    }
+
     stages {
-        stage('Checkout') {
+
+        stage('Checkout code') {
             steps {
-                echo '🔁 Cloning repository from GitHub...'
-                git branch: 'main', 
-                    url: 'https://github.com/bejiraanas/DEVSECOPS-LAB2.git'
+                checkout scm
                 sh 'ls -la'
             }
         }
-        
-        stage('Setup Environment') {
-            steps {
-                echo '⚙️ Setting up environment...'
-                sh '''
-                    python --version || echo "Python not found"
-                    pip --version || echo "Pip not found"
-                    docker --version || echo "Docker not found"
-                '''
-            }
-        }
-        
+
         stage('Install Dependencies') {
             steps {
-                echo '📦 Installing security tools...'
                 sh '''
-                    pip install bandit safety || echo "Failed to install tools"
-                    bandit --version || echo "Bandit not available"
-                    safety --version || echo "Safety not available"
+                    pip install --upgrade pip
+                    pip install flask pytest bandit safety
                 '''
             }
         }
-        
-        stage('Security Scan - Bandit') {
+
+        stage('Run Tests (pytest)') {
             steps {
-                echo '🔍 Running Bandit scan...'
                 sh '''
                     cd app
-                    bandit -r . -f txt -o ../bandit-report.txt || echo "Bandit scan failed"
-                    ls -la ../bandit-report.txt || echo "No bandit report generated"
+                    pytest --maxfail=1 --disable-warnings -q
                 '''
             }
         }
-        
-        stage('Security Scan - Safety') {
+
+        stage('Run Bandit Scan') {
             steps {
-                echo '🔍 Running Safety scan...'
                 sh '''
                     cd app
-                    safety check --file requirements.txt > ../safety-report.txt || echo "Safety scan failed"
-                    ls -la ../safety-report.txt || echo "No safety report generated"
+                    bandit -r . -f txt -o ../security-reports/bandit-report.txt
                 '''
             }
         }
-        
-        stage('Test Build') {
+
+        stage('Run Safety Scan') {
             steps {
-                echo '🐳 Testing Docker build...'
                 sh '''
-                    cd docker
-                    docker-compose build --no-cache || echo "Docker build failed"
+                    safety check --file app/requirements.txt --full-report > security-reports/safety-report.txt
+                '''
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh '''
+                    docker --version
+                    docker build -t devsecops-lab-app -f docker/Dockerfile .
                 '''
             }
         }
     }
-    
+
     post {
         always {
-            echo '📊 Collecting results...'
-            archiveArtifacts artifacts: '**/*-report.txt', fingerprint: true
-            sh 'find . -name "*.txt" -type f | head -10'
-        }
-        success {
-            echo '✅ Pipeline succeeded!'
-        }
-        failure {
-            echo '❌ Pipeline failed!'
+            echo "📊 Collecting artifacts..."
+            archiveArtifacts artifacts: 'security-reports/*.txt', fingerprint: true
         }
     }
 }
