@@ -5,8 +5,8 @@ pipeline {
     timestamps()
     disableConcurrentBuilds()
     buildDiscarder(logRotator(numToKeepStr: '20'))
+    skipDefaultCheckout()   // prevent "Declarative: Checkout SCM" (avoids dubious ownership before our fix)
   }
-
 
   triggers {
     pollSCM('H/5 * * * *')
@@ -16,18 +16,20 @@ pipeline {
     PYTHON    = 'python3'
     VENV_DIR  = '.venv'
     REPORTS   = 'reports'
-    DOCKERFILE_PATH = 'docker/Dockerfile'      // adjust if your Dockerfile lives elsewhere
-    COMPOSE_DIR     = 'docker'                 // adjust if your docker-compose.yml lives elsewhere
+    DOCKERFILE_PATH = 'docker/Dockerfile'   // adjust if needed
+    COMPOSE_DIR     = 'docker'              // folder containing docker-compose.yml or compose.yml
     IMAGE_NAME = 'devsecops-app:latest'
   }
 
   stages {
+
     stage('Preflight Clean & Git Safe Directory') {
       steps {
-        script { deleteDir() } // avoid nested/dirty workspaces
+        script { deleteDir() }                                // clean workspace to avoid stale .git
         sh '''
           set -eux
           mkdir -p "${REPORTS}"
+          # Fix Git 2.35+ “detected dubious ownership” before any checkout:
           git config --global --add safe.directory "${WORKSPACE}" || true
           git config --global --add safe.directory "*" || true
         '''
@@ -49,9 +51,9 @@ pipeline {
           ${PYTHON} -m venv "${VENV_DIR}"
           . "${VENV_DIR}/bin/activate"
           pip install --upgrade pip
-          # Install project deps if present
+          # Project deps (if present)
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          # Ensure CI tools exist on the agent
+          # CI tools
           pip install pytest pytest-cov bandit safety
         '''
       }
@@ -68,8 +70,7 @@ pipeline {
       }
       post {
         always {
-          archiveArtifacts artifacts: 'reports/bandit-report.json', fingerprint: true
-          sh 'echo "📄 Bandit report generated"'
+          archiveArtifacts artifacts: 'reports/bandit-report.json', fingerprint: true, allowEmptyArchive: true
         }
       }
     }
@@ -90,7 +91,7 @@ pipeline {
       }
       post {
         always {
-          archiveArtifacts artifacts: 'reports/safety-report.json', fingerprint: true
+          archiveArtifacts artifacts: 'reports/safety-report.json', fingerprint: true, allowEmptyArchive: true
         }
       }
     }
@@ -133,7 +134,7 @@ pipeline {
       }
       post {
         always {
-          archiveArtifacts artifacts: 'reports/trivy-report.json', fingerprint: true
+          archiveArtifacts artifacts: 'reports/trivy-report.json', fingerprint: true, allowEmptyArchive: true
         }
       }
     }
@@ -145,8 +146,7 @@ pipeline {
           . "${VENV_DIR}/bin/activate"
           echo "🧪 Running application tests..."
           if [ -f "test_app.py" ] || [ -d "tests" ]; then
-            pytest -q --maxfail=1 --disable-warnings \
-              --junitxml="${REPORTS}/pytest.xml"
+            pytest -q --maxfail=1 --disable-warnings --junitxml="${REPORTS}/pytest.xml"
           else
             echo "No tests found - skipping tests"
           fi
@@ -166,7 +166,6 @@ pipeline {
           echo "🚀 Building and deploying application..."
           if [ -f "${COMPOSE_DIR}/docker-compose.yml" ] || [ -f "${COMPOSE_DIR}/compose.yml" ]; then
             cd "${COMPOSE_DIR}"
-            # Prefer modern CLI; fallback to legacy if needed
             if docker compose version >/dev/null 2>&1; then
               docker compose up -d
             else
@@ -182,31 +181,25 @@ pipeline {
 
     stage('Generate Summary') {
       steps {
-        sh '''
-          echo "📊 SECURITY SCAN SUMMARY"
-          echo "========================"
-          echo "✅ Bandit: Code security analysis"
-          echo "✅ Safety: Dependency vulnerability check"
-          echo "✅ Trivy: Container security scan"
-          echo "✅ Tests: Application functionality"
-          echo "✅ Deployment: Container deployment"
-          echo ""
-          echo "All security reports saved as Jenkins artifacts"
-          echo "Check the 'Artifacts' section to download reports"
-        '''
+        echo """
+📊 SECURITY SCAN SUMMARY
+========================
+✅ Bandit: Code security analysis
+✅ Safety: Dependency vulnerability check
+✅ Trivy: Container security scan
+✅ Tests: Application functionality
+✅ Deployment: Container deployment
+
+All security reports are archived under 'Artifacts'.
+"""
       }
     }
   }
 
+  // Keep post lightweight (no workspace access in case checkout fails very early)
   post {
     always {
       echo "🎉 DEVSECOPS PIPELINE COMPLETE"
-      archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
-      sh '''
-        echo "Pipeline finished at: $(date)"
-        echo "Generated reports:"
-        ls -la reports || true
-      '''
     }
     success { echo "✅ SUCCESS: All stages completed successfully!" }
     failure { echo "❌ FAILED: Some stages failed - check logs above" }
