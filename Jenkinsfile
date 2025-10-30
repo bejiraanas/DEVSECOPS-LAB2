@@ -2,9 +2,11 @@ pipeline {
   agent any
 
   options {
-    ansiColor('xterm'); timestamps(); disableConcurrentBuilds()
+    timestamps()
+    disableConcurrentBuilds()
     buildDiscarder(logRotator(numToKeepStr: '20'))
   }
+
 
   triggers {
     pollSCM('H/5 * * * *')
