@@ -83,15 +83,14 @@ pipeline {
     stage('Safety Dependency Check') {
       steps {
         sh '''
-          set -eux
-          . "${VENV_DIR}/bin/activate"
-          echo "🔍 Running Safety dependency vulnerability check..."
-          if [ -f "requirements.txt" ]; then
-            safety check --json --file=requirements.txt --output "${REPORTS}/safety-report.json" || echo "Safety completed with exit code: $?"
-          else
-            echo '{"vulnerabilities": []}' > "${REPORTS}/safety-report.json"
-            echo "No requirements.txt found - created empty Safety report"
-          fi
+            set -eux
+            . .venv/bin/activate
+            echo "🔍 Running Safety dependency vulnerability check..."
+            if [ -f "requirements.txt" ]; then
+                safety check --file=requirements.txt --output json > reports/safety-report.json || echo "Safety completed with exit code: $?"
+            else
+                echo '{"vulnerabilities": []}' > reports/safety-report.json
+            fi
         '''
       }
       post {
