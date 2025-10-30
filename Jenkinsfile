@@ -39,7 +39,12 @@ pipeline {
     stage('Checkout Code') {
       steps {
         git branch: 'main', url: 'https://github.com/bejiraanas/DEVSECOPS-LAB2.git'
-        sh 'echo "✅ Code checked out from GitHub" && ls -la'
+        
+        sh '''
+            echo "✅ Code checked out from GitHub"
+            ls -la
+            mkdir -p reports       # <-- ensure artifacts folder exists after checkout
+        '''
       }
     }
 
